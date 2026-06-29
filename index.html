@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>One Gerrit tree, two servlet worlds — the EE8/EE10 flavoured release</title>
+<meta name="description" content="Shipping both the EE8 (javax.servlet) and EE10 (jakarta.servlet) flavours of Gerrit from one source tree: bazel build release release-ee10 produces both WARs side by side, the EE8 default byte-for-byte unchanged.">
+<meta name="author" content="David Ostrovsky">
+<meta property="og:title" content="One Gerrit tree, two servlet worlds — the EE8/EE10 flavoured release">
+<meta property="og:description" content="Both javax.servlet (EE8) and jakarta.servlet (EE10) Gerrit from a single source tree, in one bazel invocation. No fork, no next branch.">
+<meta property="og:type" content="article">
+<meta property="article:author" content="David Ostrovsky">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --bg-elevated: #131a2e;
+    --bg-card: #1a2240;
+    --bg-card-hover: #1f2849;
+    --border: #2a3357;
+    --border-soft: #1f2849;
+    --text: #e8ecf4;
+    --text-muted: #9aa4be;
+    --text-dim: #6b7494;
+    --accent: #22d3ee;
+    --accent-soft: rgba(34, 211, 238, 0.1);
+    --accent-glow: rgba(34, 211, 238, 0.3);
+    --gold: #fbbf24;
+    --silver: #cbd5e1;
+    --bronze: #d97706;
+    --red: #ef4444;
+    --green: #10b981;
+    --purple: #a78bfa;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    background-image:
+      radial-gradient(at 20% 0%, rgba(34, 211, 238, 0.05) 0px, transparent 50%),
+      radial-gradient(at 80% 0%, rgba(167, 139, 250, 0.04) 0px, transparent 50%);
+    background-attachment: fixed;
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ============ HERO ============ */
+  .hero {
+    text-align: center;
+    padding: 80px 24px 60px;
+    border-bottom: 1px solid var(--border-soft);
+    position: relative;
+  }
+
+  .hero::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  }
+
+  .hero-eyebrow {
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-weight: 700;
+    margin-bottom: 24px;
+    padding: 6px 14px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-glow);
+    border-radius: 20px;
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 800;
+    line-height: 1.15;
+    margin: 0 auto 24px;
+    max-width: 900px;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #e8ecf4 0%, #22d3ee 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero h1 code {
+    -webkit-text-fill-color: initial;
+    color: #c0e6f5;
+  }
+
+  .hero p.tagline {
+    font-size: 1.15rem;
+    color: var(--text-muted);
+    max-width: 700px;
+    margin: 0 auto;
+  }
+
+  .hero-byline {
+    display: inline-block;
+    margin-top: 28px;
+    padding: 10px 18px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.92rem;
+    color: var(--text-muted);
+  }
+
+  .hero-byline strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .hero-byline .role {
+    color: var(--accent);
+    font-weight: 500;
+    margin-left: 4px;
+  }
+
+  /* ============ SECTIONS ============ */
+  section {
+    padding: 70px 0;
+  }
+
+  section + section {
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .section-header {
+    margin-bottom: 40px;
+  }
+
+  .section-header h2 {
+    font-size: 1.875rem;
+    font-weight: 700;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+
+  .section-header .subtitle {
+    color: var(--text-muted);
+    font-size: 1rem;
+    margin: 0;
+    max-width: 700px;
+  }
+
+  /* ============ CONTEXT ============ */
+  .context {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    font-size: 0.97rem;
+    color: var(--text-muted);
+  }
+
+  .context p {
+    margin: 0 0 12px;
+  }
+
+  .context p:last-child {
+    margin-bottom: 0;
+  }
+
+  .context strong {
+    color: var(--text);
+  }
+
+  .context-list {
+    margin: 10px 0 16px;
+    padding-left: 4px;
+    list-style: none;
+  }
+
+  .context-list li {
+    padding: 6px 0 6px 28px;
+    position: relative;
+    color: var(--text-muted);
+  }
+
+  .context-list li::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 16px;
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  .context-list li strong {
+    color: var(--text);
+  }
+
+  .callout {
+    background: rgba(34, 211, 238, 0.08);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px;
+    margin: 18px 0;
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.97rem;
+  }
+
+  .callout strong {
+    color: var(--accent);
+  }
+
+  /* ============ INLINE LINKS ============ */
+  a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  /* ============ TABLE OPTION LINKS ============ */
+  .opt-link {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 500;
+    transition: opacity 0.2s ease;
+  }
+
+  .opt-link::after {
+    content: " ↗";
+    display: inline-block;
+    margin-left: 2px;
+    font-size: 0.85em;
+  }
+
+  .opt-link:hover {
+    opacity: 0.75;
+    text-decoration: underline;
+  }
+
+  /* ============ COMPANION PROPOSAL NOTE ============ */
+  .companion-note {
+    background: rgba(167, 139, 250, 0.08);
+    border-left: 3px solid var(--purple);
+    padding: 18px 22px;
+    margin-top: 24px;
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    line-height: 1.65;
+  }
+
+  .companion-note strong {
+    color: var(--purple);
+  }
+
+  .companion-note a {
+    color: var(--purple);
+    text-decoration: none;
+    font-weight: 600;
+  }
+
+  .companion-note a:hover {
+    text-decoration: underline;
+  }
+
+  .companion-note a::after {
+    content: " ↗";
+    font-size: 0.85em;
+  }
+
+  /* ============ TABLE ============ */
+  .table-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    overflow-x: auto;
+  }
+
+  .options-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 600px;
+  }
+
+  .options-table th {
+    background: var(--bg-elevated);
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  .options-table td {
+    padding: 18px 16px;
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 0.95rem;
+    vertical-align: top;
+  }
+
+  .options-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .options-table tbody tr {
+    transition: background 0.2s ease;
+  }
+
+  .options-table tbody tr:hover {
+    background: var(--accent-soft);
+  }
+
+  .opt-num {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+
+  .opt-title {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* ============ PERSPECTIVES ============ */
+  .perspectives {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  .perspective {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .perspective:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-glow);
+    box-shadow: 0 12px 32px -16px rgba(34, 211, 238, 0.2);
+  }
+
+  .perspective-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin: 0 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .perspective-title .emoji {
+    font-size: 1.5rem;
+  }
+
+  .perspective-body {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin: 0;
+  }
+
+  .perspective-body strong {
+    color: var(--text);
+  }
+
+  /* ============ RANK CARDS ============ */
+  .rank-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    margin-bottom: 24px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s ease;
+  }
+
+  .rank-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 5px;
+    height: 100%;
+  }
+
+  .rank-card.gold::before { background: linear-gradient(180deg, var(--gold), #f59e0b); }
+  .rank-card.silver::before { background: linear-gradient(180deg, var(--silver), #94a3b8); }
+  .rank-card.bronze::before { background: linear-gradient(180deg, var(--bronze), #92400e); }
+  .rank-card.no-go::before { background: linear-gradient(180deg, var(--red), #b91c1c); }
+
+  .rank-card.gold:hover { border-color: var(--gold); }
+  .rank-card.silver:hover { border-color: var(--silver); }
+  .rank-card.bronze:hover { border-color: var(--bronze); }
+  .rank-card.no-go:hover { border-color: var(--red); }
+
+  .rank-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+
+  .rank-medal {
+    font-size: 2.5rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .rank-info {
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .rank-info h3 {
+    margin: 0 0 6px;
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .rank-info .rank-label {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .rank-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-left: auto;
+    align-self: center;
+  }
+
+  .rank-badge.recommended {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+  }
+
+  .rank-badge.acceptable {
+    background: rgba(203, 213, 225, 0.1);
+    color: var(--silver);
+    border: 1px solid rgba(203, 213, 225, 0.3);
+  }
+
+  .rank-badge.suboptimal {
+    background: rgba(217, 119, 6, 0.15);
+    color: var(--bronze);
+    border: 1px solid rgba(217, 119, 6, 0.4);
+  }
+
+  .rank-badge.reject {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+  }
+
+  .rank-section {
+    margin-top: 22px;
+  }
+
+  .rank-section:first-of-type {
+    margin-top: 0;
+  }
+
+  .rank-section-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 0 0 12px;
+    font-weight: 700;
+  }
+
+  .rank-card.gold .rank-section-title.accent { color: var(--gold); }
+  .rank-card.silver .rank-section-title.accent { color: var(--silver); }
+  .rank-card.bronze .rank-section-title.accent { color: var(--bronze); }
+  .rank-card.no-go .rank-section-title.accent { color: var(--red); }
+
+  .rank-section p {
+    margin: 0 0 14px;
+    color: var(--text-muted);
+    font-size: 0.97rem;
+  }
+
+  .rank-section p strong {
+    color: var(--text);
+  }
+
+  .rank-list {
+    margin: 8px 0;
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .rank-list li {
+    padding: 8px 0 8px 30px;
+    position: relative;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+
+  .rank-list li.pro::before {
+    content: "✓";
+    position: absolute;
+    left: 4px;
+    top: 8px;
+    color: var(--green);
+    font-weight: 800;
+    font-size: 1.1rem;
+  }
+
+  .rank-list li.con::before {
+    content: "✕";
+    position: absolute;
+    left: 4px;
+    top: 8px;
+    color: var(--red);
+    font-weight: 800;
+    font-size: 1.05rem;
+  }
+
+  .rank-list li strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* ============ TL;DR ============ */
+  .tldr {
+    background:
+      radial-gradient(ellipse at top left, rgba(34, 211, 238, 0.12), transparent 60%),
+      linear-gradient(135deg, rgba(34, 211, 238, 0.06), rgba(167, 139, 250, 0.04));
+    border: 1px solid rgba(34, 211, 238, 0.3);
+    border-radius: 20px;
+    padding: 44px;
+    margin-top: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tldr::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.5), transparent);
+    height: 1px;
+    top: -1px;
+  }
+
+  .tldr-label {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--bg);
+    font-weight: 800;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 6px 14px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+  }
+
+  .tldr h2 {
+    font-size: 1.875rem;
+    margin: 0 0 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .tldr p {
+    margin: 0 0 14px;
+    color: var(--text);
+    font-size: 1.05rem;
+    line-height: 1.7;
+  }
+
+  .tldr p:last-child {
+    margin-bottom: 0;
+  }
+
+  .tldr strong {
+    color: var(--accent);
+  }
+
+  /* ============ FOOTER ============ */
+  footer {
+    margin-top: 80px;
+    padding: 40px 24px;
+    border-top: 1px solid var(--border-soft);
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.875rem;
+  }
+
+  footer p {
+    margin: 8px 0;
+  }
+
+  footer a {
+    color: var(--accent);
+    text-decoration: none;
+    transition: opacity 0.2s ease;
+  }
+
+  footer a:hover {
+    opacity: 0.8;
+  }
+
+  footer strong {
+    color: var(--text);
+  }
+
+  /* ============ CODE ============ */
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, "Liberation Mono", monospace;
+    background: var(--bg-elevated);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.86em;
+    color: #c0e6f5;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  pre {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin: 20px 0;
+    overflow-x: auto;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    border-radius: 0;
+    white-space: pre;
+    color: #c0e6f5;
+  }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 768px) {
+    .hero {
+      padding: 60px 16px 50px;
+    }
+    section {
+      padding: 50px 0;
+    }
+    .container {
+      padding: 0 16px;
+    }
+    .options-table th,
+    .options-table td {
+      padding: 12px 10px;
+      font-size: 0.85rem;
+    }
+    .rank-card {
+      padding: 24px;
+    }
+    .tldr {
+      padding: 32px 24px;
+    }
+    .tldr h2 {
+      font-size: 1.5rem;
+    }
+    .rank-badge {
+      margin-left: 0;
+      margin-top: 8px;
+    }
+  }
+
+  /* ============ PRINT ============ */
+  @media print {
+    body {
+      background: white;
+      color: black;
+      background-image: none;
+    }
+    .hero h1 {
+      -webkit-text-fill-color: black;
+      background: none;
+    }
+    .rank-card, .perspective, .table-wrap, .tldr, .context {
+      background: white;
+      border-color: #ccc;
+      page-break-inside: avoid;
+    }
+    .options-table th {
+      background: #f5f5f5;
+      color: #333;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="container">
+    <span class="hero-eyebrow">A Gerrit &amp; JGit maintainer's announcement</span>
+    <h1>One Gerrit tree, two servlet worlds</h1>
+    <p class="tagline">Shipping both the EE8 (<code>javax.servlet</code>) and EE10 (<code>jakarta.servlet</code>) flavours of Gerrit from a single source tree — in one <code>bazel</code> invocation, with the EE8 default byte-for-byte unchanged.</p>
+    <p class="hero-byline">by <strong>David Ostrovsky</strong><span class="role">— Gerrit &amp; JGit maintainer</span></p>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ THE QUESTION ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>The question</h2>
+      </div>
+      <div class="context">
+        <p>JGit moved to <code>jakarta.servlet</code> (EE10) — so consuming current JGit already forces a servlet-namespace decision. Jetty 12 ships EE8 and EE10 side by side. Gitiles is adding an EE10 (jakarta) flavour of its own (uploaded for review). Meanwhile most of Gerrit — and the large body of existing plugins — still lives on <code>javax.servlet</code> (EE8). So the ecosystem is already split, and every operator faces the same fork in the road:</p>
+        <ul>
+          <li>move to <code>jakarta.servlet</code> now and break every <code>javax.servlet</code> plugin you depend on, or</li>
+          <li>stay on <code>javax.servlet</code> and get left behind as the libraries advance.</li>
+        </ul>
+        <p>A single default can't serve both groups. Moving the default to EE10 breaks the EE8 majority; staying EE8-only forever strands the early adopters. So we asked a different question:</p>
+        <div class="callout">
+          <strong>What if we produced <em>both</em> worlds — EE8 (<code>javax.servlet</code>) and EE10 (<code>jakarta.servlet</code>) — from a single Gerrit source tree?</strong>
+        </div>
+        <p>No long-lived fork. No <code>next</code> or <code>servlet-4</code> branch. No duplicated codebase. Just one tree that builds two releases. This is the announcement that it now works, end to end.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ THE ANSWER ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>The answer: <code>bazel build release release-ee10</code></h2>
+      </div>
+      <div class="context">
+        <p>That one command produces <strong>both</strong> flavours, side by side:</p>
+        <pre><code>bazel-bin/release.war        # EE8  — javax.servlet, Jetty 12 EE8, Guice 6  (the unchanged default)
+bazel-bin/release-ee10.war   # EE10 — jakarta.servlet, Jetty 12 EE10, Guice 7</code></pre>
+        <p>No flag, no second checkout, no configure step. The EE8 <code>release.war</code> is <strong>byte-for-byte unchanged</strong> from before the work; the EE10 WAR is built right next to it. A single runtime loads exactly one flavour — and it has to: the generated EE10 classes keep the <strong>same Java fully-qualified names</strong> as their canonical EE8 siblings, so the two flavours can never share a classpath. That is deliberate. It is what makes each flavour a drop-in replacement for the other, and selection happens entirely at build time — never at runtime.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>How it works, in four ideas</h2>
+      </div>
+      <div class="context">
+        <p><strong>1. A flavour build setting, owned by the build tooling.</strong> The servlet flavour is a single Bazel setting (<code>ee8</code> default, <code>ee10</code>), and every flavour-bearing dependency — servlet API, Jetty adapter, Guice tier, the JGit/Gitiles servlet libraries, Gerrit's own servlet boundary — selects on it.</p>
+        <p><strong>2. Self-transitioning <code>-ee10</code> targets.</strong> The <code>-ee10</code> targets carry their own build configuration transition, so they build the jakarta subgraph <em>regardless of the command line</em>. That's why both flavours build in one invocation: EE8 and EE10 each compile consistently on their own flavour.</p>
+        <p><strong>3. The servlet boundary is generated, not hand-maintained.</strong> Gerrit's <code>httpd</code> package is mechanically rewritten from the canonical <code>javax.servlet</code> sources to <code>jakarta.servlet</code> by a small, shared, dependency-free transform that touches only servlet/Jetty import prefixes and preserves package names and line numbers. A handful of genuinely-divergent Jetty-12 files get hand-written EE10 overlays. A structural guard test fails if any <code>javax.servlet</code> residue leaks into the generated flavour.</p>
+        <p><strong>4. Bridges in both directions.</strong> Each library takes the shortest path from its own canonical flavour: JGit is already <code>jakarta.servlet</code>-canonical, so it bridges <em>backward</em> to javax; Gerrit and Gitiles are still <code>javax.servlet</code>-canonical, so they bridge <em>forward</em> to jakarta. As each project's canonical flavour eventually flips to jakarta, the asymmetry quietly disappears — and the project converges back to a single flavour.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PLUGINS ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>Plugins come along — including standalone builds</h2>
+      </div>
+      <div class="context">
+        <p>Servlet-coupled plugins ship one artifact per flavour, each marked with a <code>Gerrit-Flavour: ee8|ee10</code> manifest entry; audited servlet-neutral plugins ship a single <code>any</code> artifact. Adding the EE10 flavour to a plugin is <strong>one line</strong> — a sibling target with <code>flavour = "ee10"</code> — and the shared build macro runs the transform, injects the marker, selects the jakarta plugin API, and wraps the jar in the EE10 transition.</p>
+        <p>Three plugins are already migrated, one of each kind:</p>
+        <ul>
+          <li><strong><code>gitiles</code></strong> — core plugin (consumes the generated jakarta <code>gitiles-servlet-ee10</code>);</li>
+          <li><strong><code>plugin-manager</code></strong> — core plugin;</li>
+          <li><strong><code>javamelody</code></strong> — a custom, servlet-coupled plugin that also exposes a <strong>standalone build mode</strong> (built outside the Gerrit tree against the published plugin API).</li>
+        </ul>
+        <p>To make the standalone EE10 build work, the jakarta plugin API is published to Maven Central <strong>side by side</strong> with the EE8 one — same group and version, distinguished by an <code>-ee10</code> artifactId suffix:</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>EE8 (default)</th><th>EE10 (jakarta)</th></tr></thead>
+            <tbody>
+              <tr><td><code>com.google.gerrit:gerrit-war</code></td><td><code>com.google.gerrit:gerrit-war-ee10</code></td></tr>
+              <tr><td><code>com.google.gerrit:gerrit-plugin-api</code></td><td><code>com.google.gerrit:gerrit-plugin-api-ee10</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>The whole loop is proven: javamelody's standalone build, fed <code>gerrit-plugin-api-ee10</code>, transforms its <code>javax.servlet</code> sources to jakarta and links them against a <strong>jakarta-only</strong> plugin API — exactly what a non-transformed javax import could never do.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOLDS UP ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>How "both worlds from one tree" holds up</h2>
+      </div>
+      <div class="context">
+        <div class="callout">
+          The flavour boundary is remarkably thin. Comparing the EE8 and EE10 plugin-API jars byte for byte: of <strong>36,893</strong> shared entries, <strong>36,610 are byte-identical</strong> — only <strong>283</strong> differ, and every one of them sits on the flavour boundary: the servlet classes and the Guice 6→7 cascade they pull in (<code>com.google.inject.*</code> plus the plugin-loader classes that touch Guice).
+        </div>
+        <p>The two WARs differ in exactly the expected places (servlet API 4.0.1 vs 6.1.0, Jetty EE8 vs EE10, Guice 6 vs 7, the JGit/Gitiles servlet jars, and the per-flavour plugin jars) and nowhere else. The EE8 default is untouched.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HISTORIC ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>The historic backdrop: why <code>javax</code> became <code>jakarta</code></h2>
+      </div>
+      <div class="context">
+        <p>None of this would be necessary if a package namespace hadn't moved out from under the entire Java server ecosystem. The short version:</p>
+        <ul>
+          <li>Java EE was built by Sun and then Oracle under the <code>javax.*</code> namespace.</li>
+          <li>In 2017 Oracle handed Java EE to the Eclipse Foundation, where it was renamed <strong>Jakarta EE</strong>. Oracle kept the <code>javax</code> trademark, so Eclipse could not evolve the old packages.</li>
+          <li><strong>Jakarta EE 9 (2020) renamed every <code>javax.*</code> package to <code>jakarta.*</code></strong> — a "big bang" with essentially no functional change. <code>javax.servlet</code> became <code>jakarta.servlet</code>, and that single rename rippled through Servlet 5/6, Tomcat 10+, Jetty 12, Guice's servlet extension (DI), Spring 6, and everything built on them.</li>
+        </ul>
+        <p>So a project that wants a current servlet container or a modern Jetty has to be on <code>jakarta.servlet</code>; a project that must keep a large body of existing <code>javax.servlet</code> integrations cannot move yet. JGit has already made the jump and is <code>jakarta.servlet</code>-canonical; Gitiles is adding a jakarta flavour of its own (in review) but, like Gerrit and most of its plugins, remains <code>javax.servlet</code>-canonical. The ecosystem is split straight down that namespace line — which is exactly the split this work lets a single Gerrit tree straddle, instead of forcing a flag day.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ NOT NEW ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>Not a new idea for Gerrit</h2>
+      </div>
+      <div class="context">
+        <p>Carrying two paths through a migration — and retiring the older one once the move is complete — is familiar territory. ReviewDb and NoteDb, GWT and PolyGerrit, ChangeScreen and ChangeScreen2 each ran side by side during their transitions. The lesson from all of them: every path has to be a real, supported product — built, tested, documented — not a hidden build variant, and the superseded one is eventually removed. The EE8 flavour is on exactly that trajectory.</p>
+        <p>The shape of the solution mirrors Jetty 12's own EE8/EE10 architecture, which ships both servlet flavours from a single project. The idea was raised by Nasser Grainawi in Gerrit community discussion:</p>
+        <div class="callout">
+          Hmm, that's an interesting idea. Another idea geared towards the future support problem … was what if we followed the jetty approach in jgit/gitiles/gerrit and have in-tree support for both servlet-4 and servlet-6+. It's absolutely more overhead to maintain both and maybe it falls apart when you start looking at other dependencies, but it could be a path to providing a newer servlet version …
+        </div>
+        <p>This is the answer to that "what if": it does not fall apart, the overhead is a single transform plus a thin per-flavour boundary, and both worlds ship from one tree.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STATUS ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>Status</h2>
+      </div>
+      <div class="context">
+        <p>The work spans JGit, Gitiles, Bazlets, Gerrit, the core and custom plugins, and both build modes — in-tree and standalone. Both major changes were thought through before any code: detailed design proposals — <em>Add first-class EE8 servlet modules to JGit</em> and the <em>Flavoured Gerrit release</em> (this announcement) — were written and submitted first, and the full change series is now uploaded for review (all linked in References below). Publishing the EE10 flavour to operators is the rollout step that remains; once all stakeholders have moved, the EE8 flavour will be retired and the project will converge back to one servlet world.</p>
+        <p>A welcome side effect: this also untangles the long-standing <strong>Gerrit JGit submodule maintenance</strong>. Until now Gerrit consumed JGit through a dedicated <code>servlet-4</code> branch (kept on <code>javax.servlet</code>), which had to be kept alive by continually merging up from JGit <code>master</code> — a standing maintenance burden. With first-class EE8 modules in mainline JGit, each Gerrit branch can track its natural JGit branch directly: Gerrit <code>master</code> → JGit <code>master</code>, and a Gerrit stable branch → its matching JGit stable branch (e.g. <code>gerrit-3.12</code> → JGit <code>stable-7.4</code>). The <code>servlet-4</code> branch, and the merge-up churn it required, can be retired.</p>
+        <div class="callout">
+          <strong>One tree. Two worlds. One command.</strong>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ REFERENCES ============ -->
+  <section>
+    <div class="container">
+      <div class="section-header">
+        <h2>References</h2>
+      </div>
+      <div class="context">
+        <p>The flavoured release was designed before it was coded. The design proposals come first, then the change series that implement them:</p>
+        <ul>
+          <li><strong>Gerrit EE8/EE10 flavoured release — design proposal</strong> (this work): <a href="https://www.gerritcodereview.com/design-docs/ee8-ee10-flavoured-release.html" target="_blank" rel="noopener">gerritcodereview.com/design-docs/ee8-ee10-flavoured-release.html</a></li>
+          <li><strong>JGit EE8 servlet bridge — design proposal</strong>: <a href="https://github.com/davido/jgit-ee8-servlet-bridge-design-proposal" target="_blank" rel="noopener">github.com/davido/jgit-ee8-servlet-bridge-design-proposal</a></li>
+          <li><strong>JGit issue</strong> — <em>[FEATURE] Add first-class EE8 (<code>javax.servlet</code>) modules to JGit</em>: <a href="https://github.com/eclipse-jgit/jgit/issues/272" target="_blank" rel="noopener">github.com/eclipse-jgit/jgit/issues/272</a></li>
+          <li><strong>JGit EE8 servlet bridge change series (in review)</strong> — the foundational prerequisite the whole "two flavours from one tree" idea is built on; without first-class EE8 JGit modules there is nothing for the EE8 flavour to consume. GerritHub topic <code>ee8-servlet-bridge</code>: <a href="https://review.gerrithub.io/q/topic:%22ee8-servlet-bridge%22" target="_blank" rel="noopener">review.gerrithub.io/q/topic:ee8-servlet-bridge</a></li>
+          <li><strong>Gerrit servlet bridge change series (in review)</strong> — once JGit offers the EE8 bridge, Gerrit adopts it: the next step in the chain. Gerrit topic <code>ee8-servlet-bridge</code>: <a href="https://gerrit-review.googlesource.com/q/topic:%22ee8-servlet-bridge%22" target="_blank" rel="noopener">gerrit-review.googlesource.com/q/topic:ee8-servlet-bridge</a></li>
+          <li><strong>De-leaking incidental <code>javax.servlet</code> from core/plugins</strong> — the groundwork that makes the swap possible: it minimizes the servlet surface, separating code that is genuinely servlet-coupled from code that only incidentally touches the Servlet API, so only the real boundary has to carry two flavours. Topic <code>de-leak-servlet-api</code>: <a href="https://gerrit-review.googlesource.com/q/topic:de-leak-servlet-api" target="_blank" rel="noopener">gerrit-review.googlesource.com/q/topic:de-leak-servlet-api</a></li>
+          <li><strong>EE10 flavour change series (in review)</strong> — and only then the "two flavours from one tree" story: the follow-up that adds the second flavour on top, spanning Gerrit, Bazlets, Gitiles, and the core &amp; custom plugins. Topic <code>ee10-flavour</code>: <a href="https://gerrit-review.googlesource.com/q/topic:ee10-flavour" target="_blank" rel="noopener">gerrit-review.googlesource.com/q/topic:ee10-flavour</a></li>
+          <li><strong>JGit maintenance options analysis</strong> — the trade-off study behind switching Gerrit's JGit submodule from <code>servlet-4</code> to <code>master</code>: <a href="https://davido.github.io/gerrit-jgit-maintenance/" target="_blank" rel="noopener">davido.github.io/gerrit-jgit-maintenance/</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <p>By <strong>David Ostrovsky</strong> — Gerrit &amp; JGit maintainer.</p>
+  </div>
+</footer>
+
+</body>
+</html>
